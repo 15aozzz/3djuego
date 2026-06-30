@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mototaxi 3D - Simulador de Manejo Libre</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <style>
+        body { font-family: 'Outfit', sans-serif; overflow: hidden; user-select: none; margin: 0; background: #000; }
+        .arcade-font { font-family: 'Orbitron', sans-serif; }
+        #gameCanvas { display: block; width: 100vw; height: 100vh; }
+        .glass-panel { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body>
+    <!-- Menú de Carga Inicial -->
+    <div id="mainMenu" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gray-950 bg-opacity-90 transition-opacity duration-500">
+        <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-600 arcade-font mb-4 text-center">MOTOTAXI<br>SIMULATOR</h1>
+        <p class="text-gray-300 text-lg mb-8 text-center max-w-md">Circuito Oficial</p>
+        
+        <button id="startButton" class="bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-gray-950 font-black text-xl py-4 px-10 rounded-2xl border-b-4 border-amber-800 transition transform hover:scale-105 arcade-font opacity-50 cursor-not-allowed" disabled>
+            CARGANDO JUEGO...
+        </button>
+
+        <div class="mt-8 glass-panel p-4 rounded-xl max-w-sm w-full text-center">
+            <h3 class="text-yellow-400 font-bold mb-2 arcade-font">CONTROLES</h3>
+            <p class="text-white text-sm">W / Flecha Arriba : Acelerar</p>
+            <p class="text-white text-sm">S / Flecha Abajo : Frenar / Reversa</p>
+            <p class="text-white text-sm">A - D / Flechas : Girar</p>
+        </div>
+    </div>
+
+    <!-- HUD en Juego -->
+    <div id="gameHUD" class="absolute inset-0 z-40 pointer-events-none hidden">
+        <!-- Minimapa -->
+        <div class="absolute top-6 right-6 glass-panel rounded-2xl p-2 shadow-2xl border border-white/20">
+            <canvas id="minimap" width="160" height="160" class="rounded-xl"></canvas>
+        </div>
+
+        <div class="absolute bottom-6 right-6 glass-panel rounded-2xl p-6 shadow-2xl border-t border-white/20">
+            <div class="text-center">
+                <span id="hudSpeed" class="text-6xl font-black text-white arcade-font tracking-tighter">00</span>
+                <span class="text-yellow-400 font-bold text-lg ml-1">KM/H</span>
+            </div>
+            <div class="w-full h-3 bg-gray-800 rounded-full mt-3 overflow-hidden shadow-inner">
+                <div id="rpmBar" class="h-full bg-gradient-to-r from-green-500 via-yellow-400 to-red-500 w-0 transition-all duration-75"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Cargamos el punto de entrada de nuestro juego modular -->
+    <script type="module" src="./src/main.js"></script>
+</body>
+</html>
