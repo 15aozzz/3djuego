@@ -1,4 +1,5 @@
 // physics.js - Cinemática y manejo del vehículo
+import { houseColliders } from './track.js';
 
 export const carPhysics = {
     position: new THREE.Vector3(0, 0, 0),
@@ -51,6 +52,31 @@ export function updatePhysics(dt, keys, playerGroup) {
     
     let nextX = carPhysics.position.x + moveDirection.x * carPhysics.velocity * dt;
     let nextZ = carPhysics.position.z + moveDirection.z * carPhysics.velocity * dt;
+
+    // --- SISTEMA DE COLISIONES EXACTO (AABB por casa) ---
+    let collision = false;
+    const carRadius = 0.4; // Radio del auto reducido para acercarse más a la pared
+
+    for (let i = 0; i < houseColliders.length; i++) {
+        const collider = houseColliders[i];
+        
+        const minX = collider.minX - carRadius;
+        const maxX = collider.maxX + carRadius;
+        const minZ = collider.minZ - carRadius;
+        const maxZ = collider.maxZ + carRadius;
+
+        // Si entramos en el área de LA CASA EXACTA
+        if (nextX > minX && nextX < maxX && nextZ > minZ && nextZ < maxZ) {
+            collision = true;
+            break;
+        }
+    }
+
+    if (collision) {
+        carPhysics.velocity = 0;
+        nextX = carPhysics.position.x;
+        nextZ = carPhysics.position.z;
+    }
 
     // Límite del mapa de la ciudad (Mundo abierto de 1000x1000)
     if (Math.abs(nextX) > 490) {

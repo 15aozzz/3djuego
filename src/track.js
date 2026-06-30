@@ -3,6 +3,7 @@
 export function getRoadCenterX(z) { return 0; } // Mantenemos para evitar errores de importación
 
 export const mapData = []; // Para el minimapa
+export const houseColliders = []; // Para colisiones exactas con las paredes
 
 export function createTrack(scene) {
     const size = 1000;
@@ -21,9 +22,13 @@ export function createTrack(scene) {
         ironGeo: new THREE.CylinderGeometry(0.1, 0.1, 2),
         ironMat: new THREE.MeshBasicMaterial({ color: 0x333333 }),
         roofMat: new THREE.MeshStandardMaterial({ color: 0x777788, roughness: 0.7 }),
-        houseMaterials: [
-            0xcb6040, 0xcb6040, 0xd1c19b, 0x5a9db6, 0xdfb44a, 0x9ba2a6
-        ].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 })),
+        // Ya no usamos array de materiales individuales, usamos colores puros e InstancedMaterial
+        houseColors: [
+            new THREE.Color(0xcb6040), new THREE.Color(0xcb6040), 
+            new THREE.Color(0xd1c19b), new THREE.Color(0x5a9db6), 
+            new THREE.Color(0xdfb44a), new THREE.Color(0x9ba2a6)
+        ],
+        instancedHouseMat: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }),
         grassMat: new THREE.MeshStandardMaterial({ color: 0x3d5e3a, roughness: 1.0 }),
         concreteMat: new THREE.MeshStandardMaterial({ color: 0x889988, roughness: 0.8 }),
         courtMat: new THREE.MeshStandardMaterial({ color: 0x2a5934, roughness: 0.8 }),
@@ -49,16 +54,15 @@ export function createTrack(scene) {
         const isInCenter = (-30 < x2 && 30 > x1) && (-30 < z2 && 30 > z1);
 
         if ((!canSplitW && !canSplitH) || (w * h < 4000 && Math.random() > 0.7)) {
-            // No podemos (o decidimos no) seguir cortando. Es una manzana final.
             if (!isInCenter) {
                 blocks.push({ x1, z1, x2, z2, w, h, cx: (x1+x2)/2, cz: (z1+z2)/2 });
             }
             return;
         }
         
-        let splitH = false; // Cortar horizontalmente (una pista de izquierda a derecha)
+        let splitH = false; 
         if (canSplitW && canSplitH) {
-            splitH = h > w; // Cortar siempre el lado más largo para evitar tiras delgadas
+            splitH = h > w; 
         } else if (canSplitH) {
             splitH = true;
         } else {
@@ -80,7 +84,6 @@ export function createTrack(scene) {
         }
     }
 
-    // Empezamos con un gran rectángulo de 900x900 (dejamos un margen de 50 a los lados)
     splitCityBox(-450, -450, 450, 450);
 
     let canchasCount = 0;
@@ -88,14 +91,10 @@ export function createTrack(scene) {
     const MAX_CANCHAS = 3;
     const MAX_PARKS = 15;
     
-    // Lista para guardar las ubicaciones de las áreas verdes y forzar separación
     const greenZones = [];
-
-    // Mezclar el array de bloques para distribución aleatoria
     const shuffledBlocks = [...blocks].sort(() => Math.random() - 0.5);
 
     shuffledBlocks.forEach(block => {
-        // Verificar si está muy cerca de otro parque o cancha (mínimo 150 metros de separación)
         let isTooClose = false;
         for (const zone of greenZones) {
             const dist = Math.hypot(zone.cx - block.cx, zone.cz - block.cz);
@@ -118,93 +117,136 @@ export function createTrack(scene) {
         }
     });
 
+    // Estructura de datos para InstancedMesh
+    const houseData = { bases: [], seconds: [], roofs: [], irons: [] };
+
     // 3. CONSTRUIR CADA MANZANA ASIMÉTRICA
     blocks.forEach(block => {
-        // Vereda base
         const sidewalk = new THREE.Mesh(new THREE.PlaneGeometry(block.w + 2, block.h + 2), sharedResources.concreteMat);
         sidewalk.rotation.x = -Math.PI / 2;
         sidewalk.position.set(block.cx, 0.05, block.cz);
         sidewalk.receiveShadow = true;
         scene.add(sidewalk);
 
-        // Qué pondremos en esta manzana?
         if (block.type === 'cancha') {
             buildCanchita(scene, block, sharedResources);
         } else if (block.type === 'park') {
             buildPark(scene, block, sharedResources);
         } else {
-            buildHousesBlock(scene, block, sharedResources);
+            buildHousesBlock(houseData, block, sharedResources);
         }
 
         mapData.push({ type: block.type, x: block.cx, z: block.cz, w: block.w, h: block.h });
     });
+
+    // 4. GENERAR INSTANCED MESHES (Mega optimización de 10,000 draw calls a 4 draw calls)
+    flushInstancedHouses(scene, sharedResources, houseData);
 }
 
-function buildHousesBlock(scene, block, res) {
+// Genera los datos matemáticos, sin ensuciar la escena con miles de mallas individuales
+function buildHousesBlock(houseData, block, res) {
     const houseDepth = 10;
+    const dummy = new THREE.Object3D();
     
-    // Llenar la manzana asimétrica fila por fila
     for (let z = block.z1 + houseDepth/2 + 1; z < block.z2 - 1; z += houseDepth) {
-        // Si no entra otra fila, terminamos
         if (z + houseDepth/2 > block.z2) break;
-        
         let currentX = block.x1 + 1; 
         
         while (currentX < block.x2 - 1) {
             let width = 5 + Math.random() * 4;
-            // Recortar la casa si se sale de la cuadra
-            if (currentX + width > block.x2 - 1) {
-                width = (block.x2 - 1) - currentX;
-            }
+            if (currentX + width > block.x2 - 1) width = (block.x2 - 1) - currentX;
             if (width < 3) break;
 
-            const houseGroup = new THREE.Group();
             const cx = currentX + width/2;
-            houseGroup.position.set(cx, 0.1, z);
-
-            const mat = res.houseMaterials[Math.floor(Math.random() * res.houseMaterials.length)];
+            const colorIndex = Math.floor(Math.random() * res.houseColors.length);
             const height = 4 + Math.random() * 5;
+            let totalH = height;
 
-            // Primer piso (Medianera total)
-            const base = new THREE.Mesh(res.boxGeo, mat);
-            base.scale.set(width, height, houseDepth);
-            base.position.y = height / 2;
-            base.castShadow = true;
-            base.receiveShadow = true;
-            houseGroup.add(base);
+            // Primer piso (Base)
+            dummy.position.set(cx, 0.1 + height / 2, z);
+            dummy.scale.set(width, height, houseDepth);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            houseData.bases.push({ matrix: dummy.matrix.clone(), colorIndex });
+
+            // GUARDAR COLISIÓN EXACTA
+            houseColliders.push({
+                minX: cx - width / 2,
+                maxX: cx + width / 2,
+                minZ: z - houseDepth / 2,
+                maxZ: z + houseDepth / 2
+            });
 
             // Segundo piso a medio terminar
-            if (Math.random() > 0.4) {
+            const hasSecondFloor = Math.random() > 0.4;
+            if (hasSecondFloor) {
                 const secondHeight = 3 + Math.random() * 2;
-                const secondFloor = new THREE.Mesh(res.boxGeo, mat);
-                secondFloor.scale.set(width * 0.9, secondHeight, houseDepth * 0.9);
-                secondFloor.position.y = height + (secondHeight / 2);
-                secondFloor.castShadow = true;
-                secondFloor.receiveShadow = true;
-                houseGroup.add(secondFloor);
+                dummy.position.set(cx, 0.1 + height + (secondHeight / 2), z);
+                dummy.scale.set(width * 0.9, secondHeight, houseDepth * 0.9);
+                dummy.updateMatrix();
+                houseData.seconds.push({ matrix: dummy.matrix.clone(), colorIndex });
                 
+                totalH += secondHeight;
+
                 // Fierros
                 for(let v = 0; v < 4; v++) {
-                    const iron = new THREE.Mesh(res.ironGeo, res.ironMat);
-                    iron.position.set((v%2===0 ? 1 : -1)*(width*0.4), height + secondHeight + 1, (v<2 ? 1 : -1)*(houseDepth*0.4));
-                    houseGroup.add(iron);
+                    const fx = cx + (v%2===0 ? 1 : -1) * (width * 0.4);
+                    const fz = z + (v<2 ? 1 : -1) * (houseDepth * 0.4);
+                    dummy.position.set(fx, 0.1 + height + secondHeight + 1, fz);
+                    dummy.scale.set(1, 1, 1);
+                    dummy.updateMatrix();
+                    houseData.irons.push({ matrix: dummy.matrix.clone() });
                 }
             }
 
             // Techo calamina
             if (Math.random() > 0.5) {
-                const roof = new THREE.Mesh(res.boxGeo, res.roofMat);
-                roof.scale.set(width * 1.05, 0.2, houseDepth * 1.05);
-                const totalH = houseGroup.children.reduce((max, c) => Math.max(max, c.position.y + c.scale.y/2 || 0), 0);
-                roof.position.y = totalH + 0.1;
-                roof.rotation.x = 0.05; 
-                roof.castShadow = true;
-                houseGroup.add(roof);
+                dummy.position.set(cx, 0.1 + totalH + 0.1, z);
+                dummy.scale.set(width * 1.05, 0.2, houseDepth * 1.05);
+                dummy.rotation.set(0.05, 0, 0);
+                dummy.updateMatrix();
+                houseData.roofs.push({ matrix: dummy.matrix.clone() });
+                dummy.rotation.set(0, 0, 0); // reset rotation
             }
 
-            scene.add(houseGroup);
             currentX += width;
         }
+    }
+}
+
+// Inyecta las mallas optimizadas en la tarjeta gráfica
+function flushInstancedHouses(scene, res, houseData) {
+    if (houseData.bases.length > 0) {
+        const baseIM = new THREE.InstancedMesh(res.boxGeo, res.instancedHouseMat, houseData.bases.length);
+        baseIM.castShadow = true; baseIM.receiveShadow = true;
+        houseData.bases.forEach((data, i) => {
+            baseIM.setMatrixAt(i, data.matrix);
+            baseIM.setColorAt(i, res.houseColors[data.colorIndex]);
+        });
+        scene.add(baseIM);
+    }
+
+    if (houseData.seconds.length > 0) {
+        const secondIM = new THREE.InstancedMesh(res.boxGeo, res.instancedHouseMat, houseData.seconds.length);
+        secondIM.castShadow = true; secondIM.receiveShadow = true;
+        houseData.seconds.forEach((data, i) => {
+            secondIM.setMatrixAt(i, data.matrix);
+            secondIM.setColorAt(i, res.houseColors[data.colorIndex]);
+        });
+        scene.add(secondIM);
+    }
+
+    if (houseData.roofs.length > 0) {
+        const roofIM = new THREE.InstancedMesh(res.boxGeo, res.roofMat, houseData.roofs.length);
+        roofIM.castShadow = true;
+        houseData.roofs.forEach((data, i) => { roofIM.setMatrixAt(i, data.matrix); });
+        scene.add(roofIM);
+    }
+
+    if (houseData.irons.length > 0) {
+        const ironIM = new THREE.InstancedMesh(res.ironGeo, res.ironMat, houseData.irons.length);
+        houseData.irons.forEach((data, i) => { ironIM.setMatrixAt(i, data.matrix); });
+        scene.add(ironIM);
     }
 }
 
