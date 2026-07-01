@@ -6,7 +6,8 @@ import { updateCamera } from './camera.js';
 import { createTrack, mapData } from './track.js';
 
 let scene, camera, renderer;
-let loadedMototaxiModel = null;
+export let loadedMototaxiModel = null;
+export let loadedEnvironmentMap = null; // Exponemos el mapa al sistema de físicas
 let playerGroup = null;
 const clock = new THREE.Clock();
 let isGameRunning = false;
@@ -22,15 +23,15 @@ function init() {
     renderer.outputEncoding = THREE.sRGBEncoding;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
+    scene.background = new THREE.Color(0x949ea3); // Gris "panza de burro" típico de Lima
+    scene.fog = new THREE.Fog(0x949ea3, 30, 250); // Neblina más cercana y densa
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
     // Iluminación
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const ambientLight = new THREE.AmbientLight(0xd1dbdf, 0.85); // Luz ambiental fuerte (cielo nublado)
     scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    const dirLight = new THREE.DirectionalLight(0xfffaed, 0.45); // Luz de sol difusa y débil
     dirLight.position.set(100, 150, 50);
     dirLight.castShadow = true;
     // Ampliar el área de las sombras para que cubra toda la ciudad
@@ -40,9 +41,11 @@ function init() {
     dirLight.shadow.camera.right = 150;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
+    // Suavizar un poco las sombras
+    dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
-    // Entorno modular
+    // Entorno modular (Ciudad Procedural Reactivada)
     createTrack(scene);
 
     window.addEventListener('resize', onWindowResize);
@@ -57,7 +60,19 @@ function init() {
 function loadModel() {
     const loader = new THREE.GLTFLoader();
     const btn = document.getElementById('startButton');
+    let loadedCount = 0;
     
+    function checkAllLoaded() {
+        loadedCount++;
+        if (loadedCount >= 1) {
+            btn.innerText = '¡INICIAR SIMULADOR!';
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            btn.disabled = false;
+            btn.onclick = startGame;
+        }
+    }
+
+    // 1. Cargar Mototaxi
     loader.load('./moto_mid_poly.glb', function(gltf) {
         const model = gltf.scene;
         
@@ -85,26 +100,26 @@ function loadModel() {
         wrapper.add(model);
         loadedMototaxiModel = wrapper;
         
-        btn.innerText = '¡INICIAR SIMULADOR!';
-        btn.classList.remove('opacity-50', 'cursor-not-allowed');
-        btn.disabled = false;
-        btn.onclick = startGame;
+        checkAllLoaded();
     }, undefined, function(e) { 
-        console.error('Error cargando modelo:', e);
+        console.error('Error cargando mototaxi:', e);
     });
 }
 
 function startGame() {
     document.getElementById('mainMenu').classList.add('hidden');
     document.getElementById('gameHUD').classList.remove('hidden');
-    
+    // Crear al jugador
     playerGroup = new THREE.Group();
-    const mesh = loadedMototaxiModel.clone();
-    playerGroup.add(mesh);
+    playerGroup.add(loadedMototaxiModel);
+    
+    // Posición inicial ajustada para aparecer frente a la plaza
+    playerGroup.position.set(0, 0, 15); 
+    
     scene.add(playerGroup);
 
-    // Asegurar que inicie en el centro de la pista y mire hacia la ruta (-Z)
-    carPhysics.position.set(0, 0, 0);
+    // Asegurar que inicie mirando hacia el obelisco (-Z)
+    carPhysics.position.set(0, 0, 15);
     carPhysics.heading = 0;
 
     isGameRunning = true;
@@ -113,7 +128,17 @@ function startGame() {
 
 function updateHUD() {
     const kmh = Math.abs(carPhysics.velocity * 3.6); 
-    document.getElementById('hudSpeed').innerText = Math.floor(kmh).toString().padStart(2, '0');
+    let speedText = Math.floor(kmh).toString().padStart(2, '0');
+    
+    // Coordenadas actuales para reajuste del mapa
+    const coordsText = ` | X: ${carPhysics.position.x.toFixed(0)}, Z: ${carPhysics.position.z.toFixed(0)}`;
+    
+    if (keys.c) {
+        document.getElementById('hudSpeed').innerText = speedText + " [GHOST]" + coordsText;
+    } else {
+        document.getElementById('hudSpeed').innerText = speedText + coordsText;
+    }
+
     const rpmPercent = (Math.abs(carPhysics.velocity) / carPhysics.maxSpeed) * 100;
     document.getElementById('rpmBar').style.width = rpmPercent + '%';
 }
@@ -160,9 +185,9 @@ function animate() {
                 // Nuevas propiedades w y h del algoritmo BSP
                 const bw = (block.w / 1000) * s;
                 const bh = (block.h / 1000) * s;
-                
                 if (block.type === 'cancha') ctx.fillStyle = '#10b981'; // Verde esmeralda (canchita)
                 else if (block.type === 'park') ctx.fillStyle = '#059669'; // Verde oscuro (parque)
+                else if (block.type === 'plaza') ctx.fillStyle = '#d1d5db'; // Gris claro (Plaza de Armas)
                 else ctx.fillStyle = '#4b5563'; // Gris medio (Manzana de casas)
 
                 ctx.fillRect(bx - bw/2, bz - bh/2, bw, bh);
