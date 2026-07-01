@@ -22,7 +22,7 @@ export function createTrack(scene) {
     const size = 1000;
 
     // 1. TERRENO BASE (Asfalto principal modificado para el cerro)
-    const groundGeo = new THREE.PlaneGeometry(size, size, 150, 150);
+    const groundGeo = new THREE.PlaneGeometry(size, size, 200, 200);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
         const vx = pos.getX(i);
@@ -261,11 +261,18 @@ function buildRampHouses(scene, block, houseData, res) {
     const startX = block.cx - block.w / 2 + 1 + houseWidth / 2;
     // Empezar exactamente en el borde sur para que la primera casa esté al ras de la zona plana
     const startZ = block.z2 - houseDepth / 2; 
-    
+
     for (let i = 0; i < cols; i++) {
         for (let j = 0; j < rows; j++) {
             const px = startX + i * houseWidth;
-            const pz = startZ - j * houseDepth; // Ir subiendo hacia el norte (-Z)
+            let pz = startZ - j * houseDepth; // Ir subiendo hacia el norte (-Z)
+            
+            // Si es la última casa (la azul del borde superior), la posicionamos 
+            // exactamente en el borde de la pista plana para que no quede más abajo.
+            if (j === rows - 1) {
+                pz = block.z1 + houseDepth / 2;
+            }
+            
             // Para decidir hacia donde mira, igual que en zona plana:
             let rotY = 0;
             const distN = Math.abs(pz - block.z1);
@@ -291,10 +298,15 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
     let boundW = Math.abs(Math.cos(rotationY)) > 0.5 ? width : houseDepth;
     let boundD = Math.abs(Math.cos(rotationY)) > 0.5 ? houseDepth : width;
     
-    // Calculamos la elevación en el borde más alto (Norte, -Z)
-    // para que la casa quede apoyada sobre el cerro y el cimiento baje.
-    const uphillZ = z - boundD / 2;
-    const elev = getTerrainHeight(cx, uphillZ);
+    // Calcular vector 'front' y 'right' basados en la rotación
+    const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), rotationY);
+    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0,1,0), rotationY);
+
+    // Calculamos la elevación en el punto MÁS BAJO bajo la casa (downhill)
+    // para que la casa no quede flotando y no deje un "espacio inclinado" debajo.
+    // El lado más bajo tocará el piso, y el más alto se enterrará en el cerro.
+    const downhillZ = z + boundD / 2;
+    const elev = getTerrainHeight(cx, downhillZ);
     
     const extension = customExtension;
     const dummy = new THREE.Object3D();
@@ -328,10 +340,6 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
         dummy.updateMatrix();
         houseData.foundations.push({ matrix: dummy.matrix.clone() });
     }
-
-    // Calcular vector 'front' y 'right' basados en la rotación
-    const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0,1,0), rotationY);
-    const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0,1,0), rotationY);
 
     if (isHybrid) {
         // Fachada al frente
@@ -388,7 +396,7 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
         houseData.windows.push({ matrix: dummy.matrix.clone() });
     }
 
-    // Colisiones matemáticas precisas para AABB (Ajustando W y D según la rotación)
+    // Colisiones matemáticas precisas para AABB
     houseColliders.push({
         minX: cx - boundW / 2,
         maxX: cx + boundW / 2,
