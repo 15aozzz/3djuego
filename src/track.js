@@ -494,15 +494,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
         houseData.brickBases.push({ matrix: dummy.matrix.clone() });
     }
 
-    // Cimientos separados para no estirar la casa (pircas de soporte)
-    if (extension > 0) {
-        dummy.position.set(cx, elev + 0.1 - extension / 2, z);
-        // Reducimos 0.05 de holgura en el cimiento
-        dummy.scale.set(width - 0.05, extension, houseDepth);
-        dummy.rotation.set(0, rotationY, 0);
-        dummy.updateMatrix();
-        houseData.foundations.push({ matrix: dummy.matrix.clone() });
-    }
+    // Cimientos eliminados porque quedan ocultos bajo el mapa y no se ven en el juego
+
 
     if (isHybrid) {
         // Fachada al frente

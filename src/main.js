@@ -23,16 +23,32 @@ function init() {
     renderer.outputEncoding = THREE.sRGBEncoding;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x949ea3); // Gris "panza de burro" típico de Lima
-    scene.fog = new THREE.Fog(0x949ea3, 30, 250); // Neblina más cercana y densa
+
+    // Crear un cielo con degradado realista (Atardecer costero / Cielo real)
+    const skyCanvas = document.createElement('canvas');
+    skyCanvas.width = 2;
+    skyCanvas.height = 512;
+    const skyCtx = skyCanvas.getContext('2d');
+    const grad = skyCtx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, '#1a365d');   // Azul profundo arriba
+    grad.addColorStop(0.4, '#2b6cb0'); // Celeste medio
+    grad.addColorStop(0.7, '#f6ad55'); // Naranja atardecer
+    grad.addColorStop(0.9, '#ed64a6'); // Rosado/Fucsia en el horizonte
+    grad.addColorStop(1, '#ffafbd');   // Horizonte suave
+    skyCtx.fillStyle = grad;
+    skyCtx.fillRect(0, 0, 2, 512);
+    
+    const skyTex = new THREE.CanvasTexture(skyCanvas);
+    scene.background = skyTex;
+    scene.fog = new THREE.FogExp2('#2b6cb0', 0.003); // Niebla atmosférica suave y azulada
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-    // Iluminación
-    const ambientLight = new THREE.AmbientLight(0xd1dbdf, 0.85); // Luz ambiental fuerte (cielo nublado)
+    // Iluminación realista a tono con el atardecer
+    const ambientLight = new THREE.AmbientLight(0xa3bffa, 0.7); // Luz ambiental azulada para las sombras
     scene.add(ambientLight);
-    const dirLight = new THREE.DirectionalLight(0xfffaed, 0.45); // Luz de sol difusa y débil
-    dirLight.position.set(100, 150, 50);
+    const dirLight = new THREE.DirectionalLight(0xfebd8b, 0.85); // Luz de sol directa anaranjada y cálida
+    dirLight.position.set(120, 80, -100);
     dirLight.castShadow = true;
     // Ampliar el área de las sombras para que cubra toda la ciudad
     dirLight.shadow.camera.top = 150;
