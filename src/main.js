@@ -55,14 +55,17 @@ function init() {
     dirLight.shadow.camera.bottom = -150;
     dirLight.shadow.camera.left = -150;
     dirLight.shadow.camera.right = 150;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.mapSize.width = 1024;  // Optimizado de 2048 a 1024
+    dirLight.shadow.mapSize.height = 1024; // Optimizado de 2048 a 1024
     // Suavizar un poco las sombras
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
 
     // Entorno modular (Ciudad Procedural Reactivada)
     createTrack(scene);
+
+    // Inicializar Caché Offline del Minimapa
+    initMinimapCache();
 
     window.addEventListener('resize', onWindowResize);
     initInput();
@@ -182,33 +185,15 @@ function animate() {
             rpmBar.style.width = `${Math.max(5, rpmPercentage)}%`;
         }
 
-        // --- ACTUALIZAR MINIMAPA ---
+        // --- ACTUALIZAR MINIMAPA (Optimizado con Caché) ---
         const mapCanvas = document.getElementById('minimap');
-        if (mapCanvas) {
+        if (mapCanvas && minimapCacheCanvas) {
             const ctx = mapCanvas.getContext('2d');
             const s = mapCanvas.width;
             
-            // Fondo asfalto
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(0, 0, s, s);
-
-            // Dibujar las manzanas del barrio
-            mapData.forEach(block => {
-                // Mapear de -500..500 a 0..160
-                const bx = ((block.x + 500) / 1000) * s;
-                const bz = ((block.z + 500) / 1000) * s;
-                
-                // Nuevas propiedades w y h del algoritmo BSP
-                const bw = (block.w / 1000) * s;
-                const bh = (block.h / 1000) * s;
-                if (block.type === 'cancha') ctx.fillStyle = '#10b981'; // Verde esmeralda (canchita)
-                else if (block.type === 'park') ctx.fillStyle = '#059669'; // Verde oscuro (parque)
-                else if (block.type === 'plaza') ctx.fillStyle = '#d1d5db'; // Gris claro (Plaza de Armas)
-                else ctx.fillStyle = '#4b5563'; // Gris medio (Manzana de casas)
-
-                ctx.fillRect(bx - bw/2, bz - bh/2, bw, bh);
-            });
-
+            // Dibujar el fondo ya cacheado en lugar de recalcular las manzanas
+            ctx.drawImage(minimapCacheCanvas, 0, 0);
+ 
             // Dibujar jugador
             const px = ((carPhysics.position.x + 500) / 1000) * s;
             const pz = ((carPhysics.position.z + 500) / 1000) * s;
@@ -217,7 +202,7 @@ function animate() {
             ctx.beginPath();
             ctx.arc(px, pz, 3, 0, Math.PI * 2);
             ctx.fill();
-
+ 
             // Dibujar la dirección de la mirada (Camera/Car heading)
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1.5;
@@ -227,7 +212,7 @@ function animate() {
             ctx.lineTo(px + Math.sin(carPhysics.heading) * 6, pz + Math.cos(carPhysics.heading) * 6);
             ctx.stroke();
         }
-
+ 
         renderer.render(scene, camera);
     } else {
         if (camera && loadedMototaxiModel) {
@@ -240,7 +225,40 @@ function animate() {
         renderer.render(scene, camera);
     }
 }
-
+ 
+let minimapCacheCanvas = null;
+ 
+function initMinimapCache() {
+    const mapCanvas = document.getElementById('minimap');
+    if (!mapCanvas) return;
+    
+    const s = mapCanvas.width;
+    minimapCacheCanvas = document.createElement('canvas');
+    minimapCacheCanvas.width = s;
+    minimapCacheCanvas.height = s;
+    
+    const ctx = minimapCacheCanvas.getContext('2d');
+    
+    // Fondo asfalto
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, s, s);
+ 
+    // Dibujar las manzanas del barrio una sola vez
+    mapData.forEach(block => {
+        const bx = ((block.x + 500) / 1000) * s;
+        const bz = ((block.z + 500) / 1000) * s;
+        const bw = (block.w / 1000) * s;
+        const bh = (block.h / 1000) * s;
+        
+        if (block.type === 'cancha') ctx.fillStyle = '#10b981';
+        else if (block.type === 'park') ctx.fillStyle = '#059669';
+        else if (block.type === 'plaza') ctx.fillStyle = '#d1d5db';
+        else ctx.fillStyle = '#4b5563';
+ 
+        ctx.fillRect(bx - bw/2, bz - bh/2, bw, bh);
+    });
+}
+ 
 function onWindowResize() {
     if (!camera || !renderer) return;
     camera.aspect = window.innerWidth / window.innerHeight;

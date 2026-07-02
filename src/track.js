@@ -195,6 +195,12 @@ export function createTrack(scene) {
     // Estructura de datos para InstancedMesh
     const houseData = { brickBases: [], paintedBases: [], foundations: [], fronts: [], seconds: [], brickSeconds: [], roofs: [], irons: [], tanks: [], doors: [], windows: [] };
 
+    // Arreglos auxiliares para instanciar la iluminación urbana
+    const instancedPoles = [];
+    const instancedCrossarms = [];
+    const instancedArms = [];
+    const instancedBulbs = [];
+
     // 3. CONSTRUIR CADA MANZANA ASIMÉTRICA
     blocks.forEach(block => {
         if (block.type === 'ramp_house') {
@@ -227,19 +233,7 @@ export function createTrack(scene) {
             buildHousesBlock(houseData, block, sharedResources);
         }
 
-        // Generar postes de luz urbanos en las esquinas de los bloques planos (Postes tipo Perú)
-        const poleGeo = new THREE.CylinderGeometry(0.12, 0.2, 8);
-        const poleMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.9 }); // Concreto típico
-        
-        // Crucetas horizontales para sostener los cables (crucetas de madera/concreto típicas)
-        const crossarmGeo = new THREE.BoxGeometry(1.6, 0.12, 0.12);
-        const crossarmMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.8 }); // Color madera oscura
-        
-        const armGeo = new THREE.BoxGeometry(1.2, 0.12, 0.12);
-        const armMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-        const lightGeo = new THREE.BoxGeometry(0.5, 0.1, 0.35);
-        const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff3a8 }); // Luz de sodio amarilla
-
+        // Recolectar datos de postes de luz urbanos en las esquinas de los bloques planos (Postes tipo Perú)
         // Esquinas de la manzana (salidas un poco para estar sobre la vereda)
         const offset = 0.5;
         const corners = [
@@ -251,36 +245,39 @@ export function createTrack(scene) {
 
         const polePositions = [];
         corners.forEach((c, idx) => {
-            // Colocamos postes en las esquinas de los bloques
             const py = getTerrainHeight(c.x, c.z);
-            const pole = new THREE.Mesh(poleGeo, poleMat);
-            pole.position.set(c.x, py + 4, c.z);
-            pole.castShadow = true;
-            pole.receiveShadow = true;
-            scene.add(pole);
+            
+            const dummy = new THREE.Object3D();
+            
+            // 1. Poste de concreto
+            dummy.position.set(c.x, py + 4, c.z);
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            instancedPoles.push(dummy.matrix.clone());
             
             // Guardamos la posición superior del poste para los cables
             polePositions.push(new THREE.Vector3(c.x, py + 8.0, c.z));
 
-            // Agregar crucetas de madera típicas para el tendido de cables (2 niveles de crucetas)
+            // 2. Agregar crucetas de madera (2 niveles de crucetas)
             for (let level = 0; level < 2; level++) {
-                const crossarm = new THREE.Mesh(crossarmGeo, crossarmMat);
-                // Rotadas según la orientación de la vereda
-                crossarm.position.set(c.x, py + 7.2 - level * 0.6, c.z);
-                crossarm.rotation.y = c.dirX * c.dirZ > 0 ? Math.PI / 4 : -Math.PI / 4;
-                scene.add(crossarm);
+                dummy.position.set(c.x, py + 7.2 - level * 0.6, c.z);
+                dummy.rotation.set(0, c.dirX * c.dirZ > 0 ? Math.PI / 4 : -Math.PI / 4, 0);
+                dummy.updateMatrix();
+                instancedCrossarms.push(dummy.matrix.clone());
             }
 
-            // Brazo de luminaria de metal
-            const arm = new THREE.Mesh(armGeo, armMat);
-            arm.position.set(c.x + c.dirX * 0.5, py + 7.6, c.z + c.dirZ * 0.5);
-            arm.rotation.y = Math.atan2(c.dirX, c.dirZ);
-            scene.add(arm);
+            // 3. Brazo de luminaria de metal
+            dummy.position.set(c.x + c.dirX * 0.5, py + 7.6, c.z + c.dirZ * 0.5);
+            dummy.rotation.set(0, Math.atan2(c.dirX, c.dirZ), 0);
+            dummy.updateMatrix();
+            instancedArms.push(dummy.matrix.clone());
 
-            // Luminaria (foco)
-            const bulb = new THREE.Mesh(lightGeo, lightMat);
-            bulb.position.set(c.x + c.dirX * 1.0, py + 7.5, c.z + c.dirZ * 1.0);
-            scene.add(bulb);
+            // 4. Luminaria (foco)
+            dummy.position.set(c.x + c.dirX * 1.0, py + 7.5, c.z + c.dirZ * 1.0);
+            dummy.rotation.set(0, Math.atan2(c.dirX, c.dirZ), 0);
+            dummy.updateMatrix();
+            instancedBulbs.push(dummy.matrix.clone());
         });
 
         // Conectar los postes con múltiples cables en paralelo que van rectos de poste a poste a los lados de la manzana
@@ -360,7 +357,44 @@ export function createTrack(scene) {
         mapData.push({ type: block.type, x: block.cx, z: block.cz, w: block.w, h: block.h });
     });
 
-    // 4. GENERAR INSTANCED MESHES
+    // 4. GENERAR POSTES E ILUMINACIÓN INSTANCIADA
+    if (instancedPoles.length > 0) {
+        const poleGeo = new THREE.CylinderGeometry(0.12, 0.2, 8);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.9 });
+        const polesIM = new THREE.InstancedMesh(poleGeo, poleMat, instancedPoles.length);
+        polesIM.castShadow = true;
+        polesIM.receiveShadow = true;
+        instancedPoles.forEach((matrix, idx) => polesIM.setMatrixAt(idx, matrix));
+        scene.add(polesIM);
+    }
+
+    if (instancedCrossarms.length > 0) {
+        const crossarmGeo = new THREE.BoxGeometry(1.6, 0.12, 0.12);
+        const crossarmMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.8 });
+        const crossarmsIM = new THREE.InstancedMesh(crossarmGeo, crossarmMat, instancedCrossarms.length);
+        crossarmsIM.castShadow = true;
+        instancedCrossarms.forEach((matrix, idx) => crossarmsIM.setMatrixAt(idx, matrix));
+        scene.add(crossarmsIM);
+    }
+
+    if (instancedArms.length > 0) {
+        const armGeo = new THREE.BoxGeometry(1.2, 0.12, 0.12);
+        const armMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+        const armsIM = new THREE.InstancedMesh(armGeo, armMat, instancedArms.length);
+        armsIM.castShadow = true;
+        instancedArms.forEach((matrix, idx) => armsIM.setMatrixAt(idx, matrix));
+        scene.add(armsIM);
+    }
+
+    if (instancedBulbs.length > 0) {
+        const lightGeo = new THREE.BoxGeometry(0.5, 0.1, 0.35);
+        const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff3a8 });
+        const bulbsIM = new THREE.InstancedMesh(lightGeo, lightMat, instancedBulbs.length);
+        instancedBulbs.forEach((matrix, idx) => bulbsIM.setMatrixAt(idx, matrix));
+        scene.add(bulbsIM);
+    }
+
+    // 5. GENERAR INSTANCED MESHES DE LAS CASAS
     flushInstancedHouses(scene, sharedResources, houseData);
 }
 
