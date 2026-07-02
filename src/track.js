@@ -227,6 +227,136 @@ export function createTrack(scene) {
             buildHousesBlock(houseData, block, sharedResources);
         }
 
+        // Generar postes de luz urbanos en las esquinas de los bloques planos (Postes tipo Perú)
+        const poleGeo = new THREE.CylinderGeometry(0.12, 0.2, 8);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.9 }); // Concreto típico
+        
+        // Crucetas horizontales para sostener los cables (crucetas de madera/concreto típicas)
+        const crossarmGeo = new THREE.BoxGeometry(1.6, 0.12, 0.12);
+        const crossarmMat = new THREE.MeshStandardMaterial({ color: 0x4a3b32, roughness: 0.8 }); // Color madera oscura
+        
+        const armGeo = new THREE.BoxGeometry(1.2, 0.12, 0.12);
+        const armMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+        const lightGeo = new THREE.BoxGeometry(0.5, 0.1, 0.35);
+        const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff3a8 }); // Luz de sodio amarilla
+
+        // Esquinas de la manzana (salidas un poco para estar sobre la vereda)
+        const offset = 0.5;
+        const corners = [
+            { x: block.x1 - offset, z: block.z1 - offset, dirX: -1, dirZ: -1 },
+            { x: block.x2 + offset, z: block.z1 - offset, dirX: 1, dirZ: -1 },
+            { x: block.x2 + offset, z: block.z2 + offset, dirX: 1, dirZ: 1 },
+            { x: block.x1 - offset, z: block.z2 + offset, dirX: -1, dirZ: 1 }
+        ];
+
+        const polePositions = [];
+        corners.forEach((c, idx) => {
+            // Colocamos postes en las esquinas de los bloques
+            const py = getTerrainHeight(c.x, c.z);
+            const pole = new THREE.Mesh(poleGeo, poleMat);
+            pole.position.set(c.x, py + 4, c.z);
+            pole.castShadow = true;
+            pole.receiveShadow = true;
+            scene.add(pole);
+            
+            // Guardamos la posición superior del poste para los cables
+            polePositions.push(new THREE.Vector3(c.x, py + 8.0, c.z));
+
+            // Agregar crucetas de madera típicas para el tendido de cables (2 niveles de crucetas)
+            for (let level = 0; level < 2; level++) {
+                const crossarm = new THREE.Mesh(crossarmGeo, crossarmMat);
+                // Rotadas según la orientación de la vereda
+                crossarm.position.set(c.x, py + 7.2 - level * 0.6, c.z);
+                crossarm.rotation.y = c.dirX * c.dirZ > 0 ? Math.PI / 4 : -Math.PI / 4;
+                scene.add(crossarm);
+            }
+
+            // Brazo de luminaria de metal
+            const arm = new THREE.Mesh(armGeo, armMat);
+            arm.position.set(c.x + c.dirX * 0.5, py + 7.6, c.z + c.dirZ * 0.5);
+            arm.rotation.y = Math.atan2(c.dirX, c.dirZ);
+            scene.add(arm);
+
+            // Luminaria (foco)
+            const bulb = new THREE.Mesh(lightGeo, lightMat);
+            bulb.position.set(c.x + c.dirX * 1.0, py + 7.5, c.z + c.dirZ * 1.0);
+            scene.add(bulb);
+        });
+
+        // Conectar los postes con múltiples cables en paralelo que van rectos de poste a poste a los lados de la manzana
+        if (polePositions.length >= 2) {
+            // Conectamos los postes consecutivamente (0 a 1, 1 a 2, 2 a 3) pero NO cerramos de 3 a 0 en diagonal, 
+            // de modo que corran paralelos a la calle y no crucen en diagonal por encima del aire de la pista.
+            for (let p = 0; p < polePositions.length - 1; p++) {
+                const start = polePositions[p];
+                const end = polePositions[p + 1];
+                
+                // Tirar 3 cables principales paralelos en las crucetas (tendido normal)
+                const wireOffsets = [
+                    { y: -0.8, xz: -0.6 },
+                    { y: -0.8, xz: 0.6 },
+                    { y: -1.4, xz: 0 }
+                ];
+                
+                wireOffsets.forEach(wOffset => {
+                    const points = [];
+                    const steps = 12;
+                    for (let k = 0; k <= steps; k++) {
+                        const t = k / steps;
+                        const x = THREE.MathUtils.lerp(start.x, end.x, t);
+                        const z = THREE.MathUtils.lerp(start.z, end.z, t);
+                        
+                        // Rotamos el offset para que los cables vayan alineados con el tendido
+                        const angle = Math.atan2(end.z - start.z, end.x - start.x) + Math.PI / 2;
+                        const offsetX = Math.cos(angle) * wOffset.xz * (1 - Math.sin(t * Math.PI) * 0.1);
+                        const offsetZ = Math.sin(angle) * wOffset.xz * (1 - Math.sin(t * Math.PI) * 0.1);
+                        
+                        const baseHeight = THREE.MathUtils.lerp(start.y, end.y, t) + wOffset.y;
+                        const sag = Math.sin(t * Math.PI) * 0.5; // Catenaria natural
+                        
+                        points.push(new THREE.Vector3(x + offsetX, baseHeight - sag, z + offsetZ));
+                    }
+                    const cableGeo = new THREE.BufferGeometry().setFromPoints(points);
+                    const cableMat = new THREE.LineBasicMaterial({ color: 0x181818 });
+                    const cable = new THREE.Line(cableGeo, cableMat);
+                    scene.add(cable);
+                });
+            }
+            
+            // Conectar la última esquina con la primera de forma perimetral recta (3 a 0)
+            // Asegurándonos de que siga la vereda del borde de la manzana y no corte diagonalmente la pista
+            const start = polePositions[polePositions.length - 1];
+            const end = polePositions[0];
+            const wireOffsets = [
+                { y: -0.8, xz: -0.6 },
+                { y: -0.8, xz: 0.6 },
+                { y: -1.4, xz: 0 }
+            ];
+            
+            wireOffsets.forEach(wOffset => {
+                const points = [];
+                const steps = 12;
+                for (let k = 0; k <= steps; k++) {
+                    const t = k / steps;
+                    const x = THREE.MathUtils.lerp(start.x, end.x, t);
+                    const z = THREE.MathUtils.lerp(start.z, end.z, t);
+                    
+                    const angle = Math.atan2(end.z - start.z, end.x - start.x) + Math.PI / 2;
+                    const offsetX = Math.cos(angle) * wOffset.xz * (1 - Math.sin(t * Math.PI) * 0.1);
+                    const offsetZ = Math.sin(angle) * wOffset.xz * (1 - Math.sin(t * Math.PI) * 0.1);
+                    
+                    const baseHeight = THREE.MathUtils.lerp(start.y, end.y, t) + wOffset.y;
+                    const sag = Math.sin(t * Math.PI) * 0.5;
+                    
+                    points.push(new THREE.Vector3(x + offsetX, baseHeight - sag, z + offsetZ));
+                }
+                const cableGeo = new THREE.BufferGeometry().setFromPoints(points);
+                const cableMat = new THREE.LineBasicMaterial({ color: 0x181818 });
+                const cable = new THREE.Line(cableGeo, cableMat);
+                scene.add(cable);
+            });
+        }
+
         mapData.push({ type: block.type, x: block.cx, z: block.cz, w: block.w, h: block.h });
     });
 
@@ -265,13 +395,11 @@ function buildRampHouses(scene, block, houseData, res) {
     for (let i = 0; i < cols; i++) {
         for (let j = 0; j < rows; j++) {
             const px = startX + i * houseWidth;
-            let pz = startZ - j * houseDepth; // Ir subiendo hacia el norte (-Z)
-            
-            // Si es la última casa (la azul del borde superior), la posicionamos 
-            // exactamente en el borde de la pista plana para que no quede más abajo.
-            if (j === rows - 1) {
-                pz = block.z1 + houseDepth / 2;
-            }
+            // Calculamos el espaciado dinámico (escalonamiento)
+            // para que no quede ningún hueco grande al final.
+            const totalRampLength = Math.abs((block.z2 - houseDepth/2) - (block.z1 + houseDepth/2));
+            const step = totalRampLength / (rows - 1);
+            let pz = startZ - j * step;
             
             // Para decidir hacia donde mira, igual que en zona plana:
             let rotY = 0;
@@ -289,6 +417,40 @@ function buildRampHouses(scene, block, houseData, res) {
 
             // Cimiento extra largo en rampas: extension = 30
             addHouse(houseData, res, px, pz, houseWidth, houseDepth, rotY, 30);
+            
+            // Colocar un poste de luz de concreto en el espacio que queda entre casas
+            // Lo ponemos de forma intermitente (por ejemplo, cada 2 filas) en el borde del bloque
+            if (j > 0 && j < rows - 1 && j % 2 === 0 && i === 0) {
+                // Posición entre la casa actual y la anterior
+                const gapZ = pz + step / 2;
+                // Colocarlo un poco salido hacia la vereda/pista
+                const poleX = px - houseWidth / 2 - 1.0; 
+                const poleY = getTerrainHeight(poleX, gapZ);
+                
+                // Poste de concreto
+                const poleGeo = new THREE.CylinderGeometry(0.15, 0.25, 8);
+                const poleMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9 });
+                const poleMesh = new THREE.Mesh(poleGeo, poleMat);
+                poleMesh.position.set(poleX, poleY + 4, gapZ);
+                poleMesh.castShadow = true;
+                poleMesh.receiveShadow = true;
+                scene.add(poleMesh);
+                
+                // Luminaria/Brazo de luz metálico apuntando a la calle
+                const armGeo = new THREE.BoxGeometry(2, 0.15, 0.15);
+                const armMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8 });
+                const armMesh = new THREE.Mesh(armGeo, armMat);
+                // Apuntar en X negativo hacia la pista
+                armMesh.position.set(poleX - 0.8, poleY + 7.8, gapZ);
+                scene.add(armMesh);
+                
+                // Foco/Luz (caja blanca brillante)
+                const lightGeo = new THREE.BoxGeometry(0.6, 0.1, 0.4);
+                const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff0b0 }); // Amarillo cálido
+                const lightMesh = new THREE.Mesh(lightGeo, lightMat);
+                lightMesh.position.set(poleX - 1.6, poleY + 7.7, gapZ);
+                scene.add(lightMesh);
+            }
         }
     }
 }
@@ -335,7 +497,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
     // Cimientos separados para no estirar la casa (pircas de soporte)
     if (extension > 0) {
         dummy.position.set(cx, elev + 0.1 - extension / 2, z);
-        dummy.scale.set(width, extension, houseDepth);
+        // Reducimos 0.05 de holgura en el cimiento
+        dummy.scale.set(width - 0.05, extension, houseDepth);
         dummy.rotation.set(0, rotationY, 0);
         dummy.updateMatrix();
         houseData.foundations.push({ matrix: dummy.matrix.clone() });
@@ -344,7 +507,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
     if (isHybrid) {
         // Fachada al frente
         dummy.position.copy(new THREE.Vector3(cx, elev + 0.1 + height/2, z).addScaledVector(dir, houseDepth/2 + 0.05));
-        dummy.scale.set(width, height, 1);
+        // Reducimos 0.05 de holgura en la fachada
+        dummy.scale.set(width - 0.05, height, 1);
         dummy.rotation.set(0, rotationY, 0);
         dummy.updateMatrix();
         houseData.fronts.push({ matrix: dummy.matrix.clone(), colorIndex });
@@ -409,7 +573,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
     if (hasSecondFloor) {
         const secondHeight = 3 + seededRandom() * 2;
         dummy.position.set(cx, elev + 0.1 + height + (secondHeight / 2), z);
-        dummy.scale.set(width * 0.9, secondHeight, houseDepth * 0.9);
+        // Reducimos 0.05 de holgura en el ancho del segundo piso
+        dummy.scale.set((width - 0.05) * 0.9, secondHeight, houseDepth * 0.9);
         dummy.rotation.set(0, rotationY, 0);
         dummy.updateMatrix();
         
@@ -432,7 +597,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
 
         // Fierros
         for(let v = 0; v < 4; v++) {
-            const fx = (v%2===0 ? 1 : -1) * (width * 0.4);
+            // Posicionamos los fierros relativos al ancho ya corregido con la holgura
+            const fx = (v%2===0 ? 1 : -1) * ((width - 0.05) * 0.4);
             const fz = (v<2 ? 1 : -1) * (houseDepth * 0.4);
             
             let ironPos = new THREE.Vector3(cx, elev + 0.1 + height + secondHeight + 1, z).addScaledVector(right, fx).addScaledVector(dir, fz);
@@ -447,7 +613,8 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
     // Techos y tanques
     if (seededRandom() > 0.5) {
         dummy.position.set(cx, elev + 0.1 + totalH + 0.1, z);
-        dummy.scale.set(width * 1.05, 0.2, houseDepth * 1.05);
+        // Reducimos 0.05 de holgura en el ancho del techo
+        dummy.scale.set((width - 0.05) * 1.05, 0.2, houseDepth * 1.05);
         dummy.rotation.set(0.05, rotationY, 0);
         dummy.updateMatrix();
         houseData.roofs.push({ matrix: dummy.matrix.clone() });
@@ -472,7 +639,7 @@ function addHouse(houseData, res, cx, z, width, houseDepth, rotationY, customExt
 
 // Algoritmo de Anillo Perimetral para garantizar que toda casa mire a la calle
 function buildHousesBlock(houseData, block, res) {
-    const houseDepth = 10;
+    const houseDepth = 9.0; // Reducido un poco más a 9.0 para separar las paredes por completo
     
     // Limites de las casas (restando 1 de vereda)
     const minX = block.x1 + 1;
@@ -488,7 +655,8 @@ function buildHousesBlock(houseData, block, res) {
         let width = 5 + seededRandom() * 4;
         if (currentX + width > maxX) width = maxX - currentX;
         if (width < 3) break;
-        addHouse(houseData, res, currentX + width/2, minZ + houseDepth/2, width, houseDepth, -Math.PI);
+        // Restamos 0.05m de holgura en el ancho y empujamos ligeramente hacia la calle (minZ + houseDepth/2 - 0.1)
+        addHouse(houseData, res, currentX + width/2, minZ + houseDepth/2 - 0.1, width - 0.05, houseDepth - 0.2, -Math.PI);
         currentX += width;
     }
 
@@ -499,7 +667,8 @@ function buildHousesBlock(houseData, block, res) {
         if (currentX + width > maxX) width = maxX - currentX;
         if (width < 3) break;
         if (maxZ - houseDepth/2 < minZ + houseDepth) break; // Evitar colisión con norte
-        addHouse(houseData, res, currentX + width/2, maxZ - houseDepth/2, width, houseDepth, 0);
+        // Empujamos hacia la calle sur (maxZ - houseDepth/2 + 0.1)
+        addHouse(houseData, res, currentX + width/2, maxZ - houseDepth/2 + 0.1, width - 0.05, houseDepth - 0.2, 0);
         currentX += width;
     }
 
@@ -511,7 +680,8 @@ function buildHousesBlock(houseData, block, res) {
         if (currentZ + width > maxZLimit) width = maxZLimit - currentZ;
         if (width < 3) break;
         if (minX + houseDepth/2 > maxX - houseDepth/2) break; // Evitar colisión
-        addHouse(houseData, res, minX + houseDepth/2, currentZ + width/2, width, houseDepth, -Math.PI/2);
+        // Empujamos hacia la calle oeste (minX + houseDepth/2 - 0.1)
+        addHouse(houseData, res, minX + houseDepth/2 - 0.1, currentZ + width/2, width - 0.05, houseDepth - 0.2, -Math.PI/2);
         currentZ += width;
     }
 
@@ -522,7 +692,8 @@ function buildHousesBlock(houseData, block, res) {
         if (currentZ + width > maxZLimit) width = maxZLimit - currentZ;
         if (width < 3) break;
         if (maxX - houseDepth/2 < minX + houseDepth/2) break; // Evitar colisión
-        addHouse(houseData, res, maxX - houseDepth/2, currentZ + width/2, width, houseDepth, Math.PI/2);
+        // Empujamos hacia la calle este (maxX - houseDepth/2 + 0.1)
+        addHouse(houseData, res, maxX - houseDepth/2 + 0.1, currentZ + width/2, width - 0.05, houseDepth - 0.2, Math.PI/2);
         currentZ += width;
     }
 }
